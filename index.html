@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hebrew Flashcards</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>Hebrew Word Trainer</h1>
+      <p class="subtitle">Master 50 words each day with first-pass + package drills.</p>
+    </header>
+
+    <section class="status-grid" aria-label="Learning status">
+      <div class="status-item"><span>Phase</span><strong id="phaseLabel">-</strong></div>
+      <div class="status-item"><span>Mastered Today</span><strong id="masteredCount">0</strong></div>
+      <div class="status-item"><span>Unknown Remaining</span><strong id="unknownCount">0</strong></div>
+      <div class="status-item"><span>First Pass Left</span><strong id="firstPassLeft">0</strong></div>
+      <div class="status-item"><span>Active Package</span><strong id="activeCount">0</strong></div>
+      <div class="status-item"><span>Package Size</span><strong id="packageSize">3</strong></div>
+    </section>
+
+    <section class="card" aria-live="polite">
+      <div id="hebrewWord" class="hebrew-word">Loading…</div>
+      <div id="translation" class="translation hidden">Translation</div>
+      <button id="revealBtn" class="secondary">Reveal Translation</button>
+    </section>
+
+    <section class="actions">
+      <button id="correctBtn" class="correct" aria-label="I got it correct">✅</button>
+      <button id="wrongBtn" class="wrong" aria-label="I got it wrong">❌</button>
+    </section>
+
+    <section class="footer-actions">
+      <button id="resetBtn" class="danger">New Day / Reset Today</button>
+    </section>
+
+    <section class="instructions">
+      <h2>Run locally</h2>
+      <ol>
+        <li>Open this folder in your terminal.</li>
+        <li>Run: <code>python3 -m http.server 8000</code></li>
+        <li>Visit <code>http://localhost:8000</code> in your browser.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
