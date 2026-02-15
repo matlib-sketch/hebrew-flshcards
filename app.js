@@ -1,5 +1,9 @@
 const STORAGE_KEY = "hebrewTrainer.today.v1";
-const TARGET_MASTERED = 50;
+const STATE_VERSION = 2;
+const FIRST_PASS_LIMIT = 50;
+const INITIAL_PACKAGE_SIZE = 3;
+const PACKAGE_INCREMENT = 3;
+const ROUNDS_TO_MASTER_PACKAGE = 3;
 
 const hebrewWordEl = document.getElementById("hebrewWord");
 const translationEl = document.getElementById("translation");
@@ -54,16 +58,21 @@ async function loadWords() {
 function loadState(words) {
   const dayStamp = new Date().toISOString().slice(0, 10);
   const allIds = words.map((w) => w.id);
+  const todayIds = shuffle([...allIds]).slice(0, Math.min(FIRST_PASS_LIMIT, allIds.length));
+
   const defaultState = {
+    schemaVersion: STATE_VERSION,
     dayStamp,
-    unknownIds: [...allIds],
+    todayIds,
+    unknownIds: [...todayIds],
     masteredToday: [],
-    firstPassQueue: shuffle([...allIds]),
+    firstPassQueue: shuffle([...todayIds]),
     firstPassDone: false,
-    packageSize: 3,
+    packageSize: INITIAL_PACKAGE_SIZE,
     packageStarted: false,
     activeIds: [],
-    consecutiveCorrect: {}
+    packageRounds: 0,
+    roundCorrectIds: []
   };
 
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -74,26 +83,37 @@ function loadState(words) {
 
   try {
     const parsed = JSON.parse(raw);
-    if (parsed.dayStamp !== dayStamp) {
+    if (
+      parsed.dayStamp !== dayStamp ||
+      parsed.schemaVersion !== STATE_VERSION
+    ) {
       saveState(defaultState);
       return defaultState;
     }
 
+    const safeToday = (parsed.todayIds || []).filter((id) => wordsById.has(id));
     const safeUnknown = (parsed.unknownIds || []).filter((id) => wordsById.has(id));
     const safeMastered = (parsed.masteredToday || []).filter((id) => wordsById.has(id));
 
     const merged = {
       ...defaultState,
       ...parsed,
-      unknownIds: safeUnknown,
-      masteredToday: safeMastered,
-      firstPassQueue: (parsed.firstPassQueue || []).filter((id) => wordsById.has(id)),
-      activeIds: (parsed.activeIds || []).filter((id) => wordsById.has(id)),
-      consecutiveCorrect: parsed.consecutiveCorrect || {}
+      todayIds: unique(safeToday),
+      unknownIds: unique(safeUnknown),
+      masteredToday: unique(safeMastered),
+      firstPassQueue: unique((parsed.firstPassQueue || []).filter((id) => wordsById.has(id))),
+      activeIds: unique((parsed.activeIds || []).filter((id) => wordsById.has(id))),
+      roundCorrectIds: unique((parsed.roundCorrectIds || []).filter((id) => wordsById.has(id)))
     };
 
-    merged.masteredToday = unique(merged.masteredToday);
-    merged.unknownIds = unique(merged.unknownIds.filter((id) => !merged.masteredToday.includes(id)));
+    const todaySet = new Set(merged.todayIds);
+    merged.masteredToday = merged.masteredToday.filter((id) => todaySet.has(id));
+    merged.unknownIds = merged.unknownIds
+      .filter((id) => todaySet.has(id))
+      .filter((id) => !merged.masteredToday.includes(id));
+    merged.firstPassQueue = merged.firstPassQueue.filter((id) => merged.unknownIds.includes(id));
+    merged.activeIds = merged.activeIds.filter((id) => merged.unknownIds.includes(id));
+    merged.roundCorrectIds = merged.roundCorrectIds.filter((id) => merged.activeIds.includes(id));
 
     if (merged.firstPassQueue.length === 0) {
       merged.firstPassDone = true;
@@ -143,17 +163,32 @@ function answerFirstPass(isCorrect) {
 
 function answerPackage(isCorrect) {
   const id = currentWordId;
-  if (isCorrect) {
-    const next = (state.consecutiveCorrect[id] || 0) + 1;
-    state.consecutiveCorrect[id] = next;
 
-    if (next >= 2) {
-      markMastered(id);
-      state.activeIds = state.activeIds.filter((wordId) => wordId !== id);
-      delete state.consecutiveCorrect[id];
+  if (!isCorrect) {
+    state.packageRounds = 0;
+    state.roundCorrectIds = [];
+    refillActiveIfNeeded();
+    return;
+  }
+
+  if (!state.roundCorrectIds.includes(id)) {
+    state.roundCorrectIds.push(id);
+  }
+
+  if (state.roundCorrectIds.length < state.activeIds.length) {
+    refillActiveIfNeeded();
+    return;
+  }
+
+  state.packageRounds += 1;
+  state.roundCorrectIds = [];
+
+  if (state.packageRounds >= ROUNDS_TO_MASTER_PACKAGE) {
+    for (const wordId of state.activeIds) {
+      markMastered(wordId);
     }
-  } else {
-    state.consecutiveCorrect[id] = 0;
+    state.activeIds = [];
+    state.packageRounds = 0;
   }
 
   refillActiveIfNeeded();
@@ -164,8 +199,10 @@ function refillActiveIfNeeded() {
     return;
   }
 
-  if (state.masteredToday.length >= TARGET_MASTERED || state.unknownIds.length === 0) {
+  if (state.unknownIds.length === 0) {
     state.activeIds = [];
+    state.packageRounds = 0;
+    state.roundCorrectIds = [];
     return;
   }
 
@@ -176,16 +213,13 @@ function refillActiveIfNeeded() {
   if (!state.packageStarted) {
     state.packageStarted = true;
   } else {
-    state.packageSize += 3;
+    state.packageSize += PACKAGE_INCREMENT;
   }
+
   const pickCount = Math.min(state.packageSize, state.unknownIds.length);
   state.activeIds = pickRandom(state.unknownIds, pickCount);
-
-  for (const id of state.activeIds) {
-    if (!(id in state.consecutiveCorrect)) {
-      state.consecutiveCorrect[id] = 0;
-    }
-  }
+  state.packageRounds = 0;
+  state.roundCorrectIds = [];
 }
 
 function ensureCurrentWord() {
@@ -194,7 +228,7 @@ function ensureCurrentWord() {
     return;
   }
 
-  if (state.masteredToday.length >= TARGET_MASTERED || state.unknownIds.length === 0) {
+  if (state.unknownIds.length === 0) {
     currentWordId = null;
     return;
   }
@@ -206,7 +240,9 @@ function ensureCurrentWord() {
     return;
   }
 
-  currentWordId = state.activeIds[Math.floor(Math.random() * state.activeIds.length)];
+  const pendingRoundIds = state.activeIds.filter((id) => !state.roundCorrectIds.includes(id));
+  const source = pendingRoundIds.length > 0 ? pendingRoundIds : state.activeIds;
+  currentWordId = source[Math.floor(Math.random() * source.length)];
 }
 
 function markMastered(id) {
@@ -240,7 +276,7 @@ function render() {
     wrongBtn.disabled = true;
   }
 
-  phaseLabelEl.textContent = state.firstPassDone ? "Packages" : "First Pass";
+  phaseLabelEl.textContent = state.firstPassDone ? `Packages (${state.packageRounds}/${ROUNDS_TO_MASTER_PACKAGE})` : "First Pass";
   masteredCountEl.textContent = String(state.masteredToday.length);
   unknownCountEl.textContent = String(state.unknownIds.length);
   firstPassLeftEl.textContent = String(state.firstPassQueue.length);
